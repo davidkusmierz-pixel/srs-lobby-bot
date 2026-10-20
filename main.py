@@ -11,7 +11,7 @@ from discord.ext import commands
 
 
 # ==========================================
-# SRS LOBBY BOT — KONFIGURACJA
+# SRS LOBBY BOT
 # ==========================================
 
 TOKEN = os.getenv("DISCORD_TOKEN")
@@ -31,72 +31,57 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 
 
 # ==========================================
-# ODCZYTYWANIE IDENTYFIKATORA POKOJU GT7
+# ODCZYT ID POKOJU GT7
 # ==========================================
 
 def odczytaj_id_pokoju(image_bytes):
-    """
-    Próbuje odczytać identyfikator pokoju GT7,
-    np. rwar1i, ze zrzutu ekranu.
-    """
-
     try:
         obraz = Image.open(io.BytesIO(image_bytes)).convert("RGB")
         szerokosc, wysokosc = obraz.size
 
-        # Fragmenty, na których może znajdować się identyfikator.
-        fragmenty = [
-            obraz,
-            obraz.crop((
-                0,
-                int(wysokosc * 0.15),
-                int(szerokosc * 0.90),
-                int(wysokosc * 0.75)
-            )),
-            obraz.crop((
-                0,
-                int(wysokosc * 0.20),
-                int(szerokosc * 0.75),
-                int(wysokosc * 0.65)
-            )),
-        ]
+        # Na typowym ekranie GT7 etykieta identyfikatora
+        # znajduje się w środkowej części ekranu.
+        # Analizujemy ten obszar, pomijając większość pozostałych napisów.
+        obszar = obraz.crop((
+            0,
+            int(wysokosc * 0.18),
+            int(szerokosc * 0.82),
+            int(wysokosc * 0.58)
+        ))
 
-        wszystkie_teksty = []
+        # Powiększamy fragment.
+        obszar = obszar.resize(
+            (obszar.width * 4, obszar.height * 4)
+        )
 
-        for fragment in fragmenty:
-            # Ograniczamy rozmiar przed powiększeniem.
-            fragment.thumbnail((1200, 900))
+        szary = ImageOps.grayscale(obszar)
+        szary = ImageEnhance.Contrast(szary).enhance(2.5)
+        szary = ImageEnhance.Sharpness(szary).enhance(2.0)
+        szary = szary.filter(ImageFilter.SHARPEN)
 
-            szary = ImageOps.grayscale(fragment)
-            szary = ImageEnhance.Contrast(szary).enhance(2.5)
-            szary = ImageEnhance.Sharpness(szary).enhance(2.0)
+        # Dwa tryby OCR.
+        teksty = []
 
-            # Powiększamy obraz, aby ułatwić odczyt małych liter.
-            szary = szary.resize(
-                (szary.width * 3, szary.height * 3)
-            )
-            szary = szary.filter(ImageFilter.SHARPEN)
+        for konfiguracja in ("--psm 6", "--psm 11"):
+            try:
+                tekst = pytesseract.image_to_string(
+                    szary,
+                    config=konfiguracja,
+                    timeout=5
+                )
+                teksty.append(tekst)
 
-            for konfiguracja in ("--psm 6", "--psm 11"):
-                try:
-                    tekst = pytesseract.image_to_string(
-                        szary,
-                        config=konfiguracja,
-                        timeout=5
-                    )
-                    wszystkie_teksty.append(tekst)
+            except RuntimeError as error:
+                logger.warning("OCR timeout: %s", error)
 
-                except RuntimeError as error:
-                    logger.warning("Przekroczono czas OCR: %s", error)
+        tekst = "\n".join(teksty)
 
-        tekst = "\n".join(wszystkie_teksty)
+        logger.info("Tekst z obszaru ID:\n%s", tekst)
 
-        logger.info("Tekst rozpoznany przez OCR:\n%s", tekst)
-
-        # Szukamy kodu bezpośrednio przy etykiecie.
+        # Szukamy etykiety oraz kodu znajdującego się po niej.
         wzory = [
-            r"identyfikator\s+pokoju\s*[:\-]?\s*([a-z0-9]{4,12})",
-            r"identyfikator\s+pokoju.{0,40}?([a-z0-9]{4,12})",
+            r"identyfikator\s+pokoju\s*[:\-]?\s*([a-z0-9]{5,10})",
+            r"identyfikator\s*pokoju.{0,25}?([a-z0-9]{5,10})",
         ]
 
         for wzor in wzory:
@@ -110,54 +95,21 @@ def odczytaj_id_pokoju(image_bytes):
                 kod = wynik.group(1).lower()
 
                 if kod not in {"identyfikator", "pokoju"}:
-                    logger.info("Znaleziono identyfikator: %s", kod)
+                    logger.info("Kandydat na ID pokoju: %s", kod)
                     return kod
 
-        # Obsługa identyfikatorów zawierających myślniki.
-        wynik = re.search(
-            r"\b[a-z0-9]{3,5}(?:-[a-z0-9]{3,5}){1,3}\b",
-            tekst,
-            re.IGNORECASE
-        )
-
-        if wynik:
-            kod = wynik.group(0).lower()
-            logger.info("Znaleziono identyfikator: %s", kod)
-            return kod
-
-        # Awaryjne wyszukiwanie kodu, np. rwar1i.
-        kandydaci = re.findall(
-            r"\b[a-z0-9]{5,10}\b",
-            tekst,
-            re.IGNORECASE
-        )
-
-        for kod in kandydaci:
-            kod = kod.lower()
-
-            if (
-                any(c.isalpha() for c in kod)
-                and any(c.isdigit() for c in kod)
-                and kod not in {
-                    "gran7",
-                    "turismo7",
-                    "srs2026",
-                    "identyfikator",
-                }
-            ):
-                logger.info("Kandydat na identyfikator: %s", kod)
-                return kod
-
-        logger.warning("Nie znaleziono identyfikatora pokoju.")
+        # Nie wybieramy przypadkowego ciągu z całego zdjęcia.
+        # Jeśli nie ma wiarygodnego wyniku, prosimy o ponowny zrzut.
+        logger.warning("Nie udało się pewnie odczytać ID pokoju.")
         return None
 
     except Exception:
-        logger.exception("Błąd podczas analizy obrazu.")
+        logger.exception("Błąd podczas analizy zdjęcia.")
         return None
 
 
 # ==========================================
-# URUCHOMIENIE BOTA
+# POŁĄCZENIE Z DISCORDEM
 # ==========================================
 
 @bot.event
@@ -166,12 +118,11 @@ async def on_ready():
 
 
 # ==========================================
-# ODBIERANIE ZDJĘĆ NA DISCORDZIE
+# OBSŁUGA ZDJĘĆ
 # ==========================================
 
 @bot.event
 async def on_message(message):
-    # Ignorujemy wiadomości wysłane przez boty.
     if message.author.bot:
         return
 
@@ -199,24 +150,19 @@ async def on_message(message):
                     f"```{identyfikator}```\n"
                     "🏎️ Dołącz do lobby w Gran Turismo 7!"
                 )
-
-                logger.info("Wysłano identyfikator: %s", identyfikator)
-
             else:
                 await message.channel.send(
-                    "⚠️ Nie udało się odczytać identyfikatora pokoju.\n"
-                    "Spróbuj wysłać wyraźniejszy zrzut ekranu."
+                    "⚠️ Nie udało się pewnie odczytać identyfikatora.\n"
+                    "Wyślij wyraźniejszy zrzut ekranu, na którym "
+                    "widać cały napis „Identyfikator pokoju”."
                 )
 
         except Exception:
             logger.exception("Błąd obsługi zdjęcia.")
 
-            try:
-                await message.channel.send(
-                    "❌ Wystąpił błąd podczas analizy zdjęcia."
-                )
-            except discord.HTTPException:
-                logger.exception("Nie udało się wysłać komunikatu błędu.")
+            await message.channel.send(
+                "❌ Wystąpił błąd podczas analizy zdjęcia."
+            )
 
     await bot.process_commands(message)
 
@@ -230,4 +176,3 @@ if __name__ == "__main__":
         logger.error("Brak tokenu DISCORD_TOKEN w GitHub Secrets!")
     else:
         bot.run(TOKEN)
-        
