@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#101216">
+  <title>SRS | Zapisy na sparing</title>
+  <style>
+    :root{--bg:#0b0d11;--panel:#151920;--panel2:#1d232c;--text:#f3f5f7;--muted:#aab2bd;--red:#e32636;--line:#303844}
+    *{box-sizing:border-box}
+    body{margin:0;min-height:100vh;padding:28px 16px;display:grid;place-items:center;color:var(--text);background:radial-gradient(circle at 50% 0%,#29212a 0,var(--bg) 48%);font-family:Arial,Helvetica,sans-serif}
+    .card{width:min(100%,560px);padding:30px;background:linear-gradient(160deg,#1a2028,var(--panel) 65%);border:1px solid var(--line);border-top:4px solid var(--red);border-radius:18px;box-shadow:0 22px 70px #0009}
+    .brand{text-align:center}.flag{font-size:34px}
+    h1{margin:10px 0 6px;font-size:clamp(25px,5vw,34px);letter-spacing:1px}
+    .subtitle{color:var(--muted);margin:0 0 24px;font-size:13px;letter-spacing:2px}
+    .intro{color:#c5cbd3;text-align:center;line-height:1.5;margin-bottom:26px}
+    label.title{display:block;font-weight:700;margin:0 0 10px}
+    input[type=text]{width:100%;padding:15px 14px;border-radius:10px;border:1px solid #414b59;background:#0f1319;color:var(--text);font-size:16px;outline:none}
+    input[type=text]:focus{border-color:var(--red);box-shadow:0 0 0 3px #e3263625}
+    .section{margin-top:24px}.choices{display:grid;gap:10px}
+    .choice{display:flex;align-items:center;gap:12px;padding:15px;background:var(--panel2);border:1px solid var(--line);border-radius:11px;cursor:pointer;transition:.15s}
+    .choice:hover{border-color:#687485;transform:translateY(-1px)}
+    .choice:has(input:checked){border-color:var(--red);background:#321b22}
+    .choice input{accent-color:var(--red);width:18px;height:18px}.choice span{font-weight:600}
+    button{width:100%;margin-top:26px;padding:16px;border:0;border-radius:10px;background:var(--red);color:white;font-weight:800;font-size:15px;letter-spacing:1px;cursor:pointer}
+    button:hover{background:#c91e2d}button:disabled{opacity:.6;cursor:wait}
+    #status{min-height:22px;margin:14px 0 0;text-align:center;font-size:14px}
+    .footer{margin-top:25px;padding-top:18px;border-top:1px solid var(--line);text-align:center;color:#858f9c;font-size:12px;letter-spacing:2px}
+    @media(max-width:480px){.card{padding:23px 18px}}
+  </style>
+</head>
+<body>
+  <main class="card">
+    <header class="brand">
+      <div class="flag">🏁</div>
+      <h1>SRS – ZAPISY NA SPARING</h1>
+      <p class="subtitle">SIM RACING SQUAD</p>
+    </header>
+    <p class="intro">Zgłoś swoją gotowość do udziału w sparingu drużynowym.</p>
+
+    <form id="signupForm">
+      <div>
+        <label class="title" for="driver">🏎️ Nazwa kierowcy (Gran Turismo 7)</label>
+        <input id="driver" name="driver" type="text" maxlength="40"
+               placeholder="Wpisz nazwę kierowcy" autocomplete="off" required>
+      </div>
+
+      <section class="section">
+        <label class="title">Wybierz swoją deklarację</label>
+        <div class="choices">
+          <label class="choice"><input type="radio" name="status" value="Skład podstawowy" required><span>🏎️ Skład podstawowy</span></label>
+          <label class="choice"><input type="radio" name="status" value="Lista rezerwowych"><span>🔄 Lista rezerwowych</span></label>
+          <label class="choice"><input type="radio" name="status" value="Nie biorę udziału"><span>❌ Nie biorę udziału</span></label>
+        </div>
+      </section>
+
+      <button id="submitBtn" type="submit">WYŚLIJ ZGŁOSZENIE</button>
+      <p id="status" role="status" aria-live="polite"></p>
+    </form>
+    <footer class="footer">🏆 SIM RACING SQUAD</footer>
+  </main>
+
+  <script>
+    // Wklej tutaj webhook kanału Discord. Uwaga: będzie widoczny publicznie w kodzie strony.
+    const DISCORD_WEBHOOK_URL = "WKLEJ_TUTAJ_WEBHOOK_DISCORDA";
+
+    const form = document.getElementById("signupForm");
+    const button = document.getElementById("submitBtn");
+    const statusBox = document.getElementById("status");
+
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+
+      const driver = document.getElementById("driver").value.trim();
+      const selected = form.querySelector('input[name="status"]:checked');
+
+      if (!driver || !selected) {
+        statusBox.textContent = "Uzupełnij nazwę kierowcy i wybierz jedną opcję.";
+        return;
+      }
+      if (!DISCORD_WEBHOOK_URL.startsWith("https://discord.com/api/webhooks/") &&
+          !DISCORD_WEBHOOK_URL.startsWith("https://discordapp.com/api/webhooks/")) {
+        statusBox.textContent = "Administrator musi najpierw wkleić webhook Discorda do pliku.";
+        return;
+      }
+
+      const status = selected.value;
+      const emoji = status === "Skład podstawowy" ? "🏎️" :
+                    status === "Lista rezerwowych" ? "🔄" : "❌";
+
+      button.disabled = true;
+      button.textContent = "WYSYŁANIE...";
+      statusBox.textContent = "";
+
+      try {
+        const response = await fetch(DISCORD_WEBHOOK_URL + (DISCORD_WEBHOOK_URL.includes("?") ? "&" : "?") + "wait=true", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            embeds: [{
+              title: "🏁 SRS – ZGŁOSZENIE NA SPARING",
+              color: status === "Skład podstawowy" ? 15138850 :
+                     status === "Lista rezerwowych" ? 3447003 : 9807270,
+              fields: [
+                { name: "🏎️ Nazwa kierowcy (Gran Turismo 7)", value: driver.replace(/@/g, "@\u200b"), inline: false },
+                { name: "Deklaracja", value: emoji + " " + status, inline: false }
+              ],
+              footer: { text: "SIM RACING SQUAD" },
+              timestamp: new Date().toISOString()
+            }]
+          })
+        });
+
+        if (!response.ok) throw new Error("Discord zwrócił błąd " + response.status);
+        statusBox.textContent = "✅ Zgłoszenie zostało wysłane na Discorda!";
+        form.reset();
+      } catch (error) {
+        statusBox.textContent = "❌ Nie udało się wysłać. Sprawdź webhook i spróbuj ponownie.";
+        console.error(error);
+      } finally {
+        button.disabled = false;
+        button.textContent = "WYŚLIJ ZGŁOSZENIE";
+      }
+    });
+  </script>
+</body>
+</html>
