@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SRS – Zapisy na sparing</title>
+<style>
+:root{--bg:#0b0d11;--panel:#151920;--line:#303844;--red:#e32636;--muted:#aab2bd}
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;padding:24px 14px;display:grid;place-items:center;background:radial-gradient(circle at top,#29212a,#0b0d11 65%);font-family:Arial,sans-serif;color:#f3f5f7}
+.card{width:min(100%,550px);padding:28px;background:var(--panel);border:1px solid var(--line);border-top:4px solid var(--red);border-radius:18px}
+header{text-align:center}.flag{font-size:38px}h1{font-size:26px;margin:10px 0}.sub{color:var(--muted);letter-spacing:3px;font-size:13px}
+.intro{text-align:center;color:#c5cbd3;line-height:1.5;margin:24px 0}
+label.title{display:block;font-weight:bold;margin:0 0 11px}
+input[type=text]{width:100%;padding:15px;border:1px solid #414b59;border-radius:9px;background:#0f1319;color:white;font-size:16px}
+.section{margin-top:24px}.options{display:grid;gap:10px}
+.option{display:flex;align-items:center;gap:12px;padding:15px;background:#1d232c;border:1px solid var(--line);border-radius:10px;cursor:pointer}
+.option:has(input:checked){border-color:var(--red);background:#321b22}
+.option input{width:18px;height:18px;accent-color:var(--red)}
+button{width:100%;margin-top:25px;padding:16px;border:0;border-radius:9px;background:var(--red);color:white;font-weight:bold;font-size:15px;cursor:pointer}
+button:disabled{opacity:.6;cursor:wait}
+#message{min-height:24px;margin-top:15px;text-align:center;line-height:1.4;overflow-wrap:anywhere}
+footer{text-align:center;color:#858f9c;margin-top:24px;padding-top:17px;border-top:1px solid var(--line);letter-spacing:2px;font-size:12px}
+</style>
+</head>
+<body>
+<main class="card">
+<header><div class="flag">🏁</div><h1>SRS – ZAPISY NA SPARING</h1><div class="sub">SIM RACING SQUAD</div></header>
+<p class="intro">Wpisz nazwę kierowcy z Gran Turismo 7 i wybierz swoją deklarację.</p>
+<form id="form">
+<label class="title" for="driver">🏎️ Nazwa kierowcy (Gran Turismo 7)</label>
+<input id="driver" type="text" maxlength="40" placeholder="Wpisz nazwę kierowcy" required>
+<section class="section">
+<label class="title">Wybierz swoją deklarację</label>
+<div class="options">
+<label class="option"><input type="radio" name="status" value="Skład podstawowy" required> 🏎️ Skład podstawowy</label>
+<label class="option"><input type="radio" name="status" value="Lista rezerwowych"> 🔄 Lista rezerwowych</label>
+<label class="option"><input type="radio" name="status" value="Nie biorę udziału"> ❌ Nie biorę udziału</label>
+</div></section>
+<button id="send" type="submit">WYŚLIJ / ZAKTUALIZUJ ZGŁOSZENIE</button>
+<div id="message" role="status" aria-live="polite"></div>
+</form>
+<footer>🏆 SIM RACING SQUAD</footer>
+</main>
+<script>
+/*
+  UZUPEŁNIJ:
+  1) Wklej webhook kanału Discord.
+  2) Przy pierwszym uruchomieniu zostaw DISCORD_MESSAGE_ID puste.
+  3) Wyślij testowe zgłoszenie. Strona utworzy wiadomość i pokaże jej ID.
+  4) Wklej pokazane ID do DISCORD_MESSAGE_ID poniżej, zapisz i ponownie opublikuj index.html.
+  Od tej chwili każdy użytkownik aktualizuje tę samą wiadomość.
+*/
+const DISCORD_WEBHOOK_URL = "WKLEJ_TUTAJ_WEBHOOK_DISCORDA";
+const DISCORD_MESSAGE_ID = "1567181029620326414";
+
+const form = document.getElementById("form");
+const button = document.getElementById("send");
+const message = document.getElementById("message");
+
+const categories = [
+  {key:"Skład podstawowy", title:"🏎️ SKŁAD PODSTAWOWY"},
+  {key:"Lista rezerwowych", title:"🔄 LISTA REZERWOWYCH"},
+  {key:"Nie biorę udziału", title:"❌ NIE BIORĄ UDZIAŁU"}
+];
+
+function cleanName(s){return String(s).trim().replace(/\s+/g," ");}
+function parseNames(value){
+  if(!value || value.trim()==="—") return [];
+  return value.split("\n").map(line=>line.replace(/^\s*\d+\.\s*/,"").trim()).filter(Boolean);
+}
+function buildEmbed(groups){
+  return {
+    embeds:[{
+      title:"🏁 SRS – ZAPISY NA SPARING",
+      color:15138850,
+      fields:categories.map(c=>({
+        name:c.title,
+        value:groups[c.key].length ? groups[c.key].map((n,i)=>`${i+1}. ${n}`).join("\n").slice(0,1024) : "—",
+        inline:false
+      })),
+      footer:{text:"SIM RACING SQUAD • Lista aktualizowana po zgłoszeniu"},
+      timestamp:new Date().toISOString()
+    }]
+  };
+}
+async function discordRequest(url, method, body){
+  const options={method,headers:{"Content-Type":"application/json"}};
+  if(body) options.body=JSON.stringify(body);
+  const response=await fetch(url,options);
+  if(!response.ok){
+    const detail=await response.text().catch(()=> "");
+    throw new Error(`Discord: ${response.status}. ${detail.slice(0,160)}`);
+  }
+  if(response.status===204) return null;
+  return response.json();
+}
+function webhookBase(){
+  return DISCORD_WEBHOOK_URL.replace(/\/$/,"");
+}
+async function submitToDiscord(driver,status){
+  const base=webhookBase();
+  if(!base.startsWith("https://discord.com/api/webhooks/") &&
+     !base.startsWith("https://discordapp.com/api/webhooks/")){
+    throw new Error("Wklej prawidłowy webhook Discorda w kodzie strony.");
+  }
+
+  let id=DISCORD_MESSAGE_ID.trim();
+  let groups={"Skład podstawowy":[],"Lista rezerwowych":[],"Nie biorę udziału":[]};
+
+  if(id){
+    const existing=await discordRequest(`${base}/messages/${encodeURIComponent(id)}`,"GET");
+    const fields=existing.embeds?.[0]?.fields || [];
+    categories.forEach((cat,index)=>{
+      const field=fields[index];
+      groups[cat.key]=parseNames(field?.value || "—");
+    });
+  }
+
+  // Ten sam nick jest usuwany ze wszystkich sekcji, a następnie dodawany do wybranej.
+  const normalized=driver.toLocaleLowerCase("pl-PL");
+  Object.keys(groups).forEach(key=>{
+    groups[key]=groups[key].filter(name=>name.toLocaleLowerCase("pl-PL")!==normalized);
+  });
+  groups[status].push(driver);
+
+  const payload=buildEmbed(groups);
+  if(id){
+    await discordRequest(`${base}/messages/${encodeURIComponent(id)}`,"PATCH",payload);
+    return {created:false,id};
+  }
+
+  // Pierwsze zgłoszenie tworzy wspólną wiadomość. Administrator musi skopiować jej ID do kodu.
+  const created=await discordRequest(`${base}?wait=true`,"POST",payload);
+  return {created:true,id:created.id};
+}
+
+form.addEventListener("submit",async event=>{
+  event.preventDefault();
+  const driver=cleanName(document.getElementById("driver").value);
+  const selected=form.querySelector('input[name="status"]:checked');
+  if(!driver || !selected){message.textContent="Wpisz nazwę kierowcy i wybierz deklarację.";return;}
+  button.disabled=true;button.textContent="AKTUALIZOWANIE...";message.textContent="";
+  try{
+    const result=await submitToDiscord(driver,selected.value);
+    if(result.created){
+      message.textContent="✅ Wiadomość została utworzona! Skopiuj to ID do DISCORD_MESSAGE_ID w pliku HTML: "+result.id+" — następnie opublikuj plik ponownie.";
+    }else{
+      message.textContent="✅ Zgłoszenie zapisane. Wspólna wiadomość na Discordzie została zaktualizowana.";
+      form.reset();
+    }
+  }catch(error){
+    console.error(error);
+    message.textContent="❌ "+error.message+" Jeśli to błąd sieci/CORS, Discord może blokować bezpośrednie połączenie z przeglądarki.";
+  }finally{
+    button.disabled=false;button.textContent="WYŚLIJ / ZAKTUALIZUJ ZGŁOSZENIE";
+  }
+});
+</script>
+</body>
+</html>
